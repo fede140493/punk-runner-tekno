@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>PUNK RUNNER</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+    <style>body{margin:0;padding:0;overflow:hidden;background:#000}</style>
+</head>
+<body>
+<script>
+Telegram.WebApp.ready();
+Telegram.WebApp.expand();
+
+const config = {
+    type: Phaser.AUTO,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    backgroundColor: '#000',
+    physics: { default: 'arcade', arcade: { gravity: { y: 1200 } } },
+    scene: { preload, create, update }
+};
+
+let game = new Phaser.Game(config);
+let player, score = 0, speed = 4, lanes, currentLane = 1, scoreText, gameOver = false;
+let pills, powders, cops, junkies;
+
+function preload() {
+    // Suoni tekno (gratuiti da freesound.org)
+    this.load.audio('kick', 'https://freesound.org/data/previews/612/612610_5674468-lq.mp3');
+    this.load.audio('collect', 'https://freesound.org/data/previews/276/276237_5123856-lq.mp3');
+    this.load.audio('gameover', 'https://freesound.org/data/previews/657/657424_12029781-lq.mp3');
+}
+
+function create() {
+    // Musica di fondo
+    this.kick = this.sound.add('kick', { loop: true, volume: 0.3 });
+    this.kick.play();
+
+    lanes = [this.scale.height * 0.7, this.scale.height * 0.5, this.scale.height * 0.3];
+    
+    // Player punk
+    player = this.add.graphics();
+    drawPlayer();
+    player.setPosition(150, lanes[1]);
+    this.physics.add.existing(player);
+    player.body.setSize(60, 100);
+
+    // Gruppi
+    pills = this.physics.add.group();
+    powders = this.physics.add.group();
+    cops = this.physics.add.group();
+    junkies = this.physics.add.group();
+
+    // Collisioni
+    this.physics.add.overlap(player, pills, collectPill, null, this);
+    this.physics.add.overlap(player, powders, collectPowder, null, this);
+    this.physics.add.collider(player, cops, hit, null, this);
+    this.physics.add.collider(player, junkies, hit, null, this);
+
+    // Score
+    scoreText = this.add.text(20, 20, 'SCORE: 0', { fontSize: '32px', fill: '#0f0' }).setDepth(10);
+
+    // Spawn
+    this.time.addEvent({ delay: 1200, callback: spawnStuff, callbackScope: this, loop: true });
+
+    // Input touch
+    this.input.on('pointerdown', pointer => {
+        if (pointer.x < this.scale.width / 2) changeLane(-1);
+        else changeLane(1);
+    });
+    this.input.on('pointerup', pointer => {
+        if (pointer.downTime < 300) jump();
+    });
+}
+
+function update() {
+    if (gameOver) return;
+    score += 0.1;
+    scoreText.setText('SCORE: ' + Math.floor(score));
+    speed = 4 + score / 1000;
+
+    // Muovi tutto
+    [pills, powders, cops, junkies].forEach(g => {
+        g.children.entries.forEach(o => {
+            o.x -= speed;
+            if (o.x < -100) o.destroy();
+        });
+    });
+
+    // Livelli
+    if (Math.floor(score) % 1000 === 0 && Math.floor(score) > 0) {
+        Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+    }
+}
+
+function drawPlayer() {
+    player.clear();
+    player.fillStyle(0xff00ff);
+    player.fillCircle(0, 0, 30); // Testa
+    player.fillStyle(0x00ff00);
+    player.fillTriangle(-20, -40, 0, -70, 20, -40); // Cresta
+    player.fillStyle(0xffffff);
+    player.fillCircle(-10, -5, 5); // Piercing
+    player.fillCircle(10, -5, 5);
+}
+
+function changeLane(dir) {
+    currentLane = Phaser.Math.Clamp(currentLane + dir, 0, 2);
+    player.y = lanes[currentLane];
+}
+
+function jump() {
+    if (player.body.touching.down || player.body.onFloor()) {
+        player.body.setVelocityY(-500);
+        Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+    }
+}
+
+function spawnStuff() {
+    const lane = Phaser.Math.Between(0, 2);
+    const y = lanes[lane];
+    const x = this.scale.width + 100;
+    const r = Math.random();
+
+    if (r < 0.25) { // Pastiglia
+        let pill = this.add.circle(x, y, 15, 0xff0000);
+        this.physics.add.existing(pill);
+        pills.add(pill);
+    } else if (r < 0.45) { // Polverina
+        let powder = this.add.rectangle(x, y, 60, 10, 0xffffff);
+        this.physics.add.existing(powder);
+        powders.add(powder);
+    } else if (r < 0.7) { // Poliziotto
+        let cop = this.add.rectangle(x, y, 50, 80, 0x0000ff);
+        this.add.triangle(x, y-50, 50, 0, -50, 0, 0, -40, 0x000000);
+        this.physics.add.existing(cop);
+        cops.add(cop);
+    } else { // Scrocco
+        let junkie = this.add.rectangle(x, y, 30, 100, 0x8B4513);
+        this.add.line(x+20, y-20, 40, 0, 0xffffff);
+        this.physics.add.existing(junkie);
+        junkies.add(junkie);
+    }
+}
+
+function collectPill(_, pill) {
+    pill.destroy();
+    score += 10;
+    this.sound.play('collect');
+    Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+    const gameScore = Math.floor(score / 100);
+    const teknoPoints = Math.min(Math.max(gameScore, 2), 15);
+    Telegram.WebApp.sendData(JSON.stringify({tekno_points: teknoPoints}));
+    Telegram.WebApp.MainButton.setText('Salva Punti').show();
+}
+
+function collectPowder(_, powder) {
+    powder.destroy();
+    score += 25;
+    speed += 1;
+    this.sound.play('collect');
+    Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+    const gameScore = Math.floor(score / 100);
+    const teknoPoints = Math.min(Math.max(gameScore, 2), 15);
+    Telegram.WebApp.sendData(JSON.stringify({tekno_points: teknoPoints}));
+    Telegram.WebApp.MainButton.setText('Salva Punti').show();
+}
+
+function hit() {
+    gameOver = true;
+    this.sound.play('gameover');
+    Telegram.WebApp.HapticFeedback.notificationOccurred('error');
+    this.add.text(this.scale.width/2, this.scale.height/2, 'GAME OVER\nScore: ' + Math.floor(score), {
+        fontSize: '48px', fill: '#f00', align: 'center'
+    }).setOrigin(0.5);
+    Telegram.WebApp.MainButton.setText("Riprova").show().onClick(() => location.reload());
+}
+</script>
+</body>
+</html>
