@@ -6,73 +6,42 @@
     <title>PUNK RUNNER TEKNO</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
-    <style>
-        body { margin:0; padding:0; overflow:hidden; background:#000; }
-        #game { width:100vw; height:100vh; }
-    </style>
+    <style>body{margin:0;padding:0;overflow:hidden;background:#000;} #game{width:100vw;height:100vh;}</style>
 </head>
 <body>
 <div id="game"></div>
-
 <script>
-// FIX SCHERMO NERO – Forziamo Telegram WebApp anche fuori Telegram (per test)
-if (!window.Telegram?.WebApp) {
-    window.Telegram = { WebApp: {
-        ready: () => console.log("[TEST] WebApp ready"),
-        expand: () => console.log("[TEST] expand"),
-        initDataUnsafe: { user: { id: 123456789, first_name: "TestUser" } },
-        sendData: (data) => {
-            console.log("PUNTI INVIATI (TEST): " + data);
-            alert("Punti salvati! " + data);
-        },
-        HapticFeedback: { 
-            impactOccurred: () => console.log("vibra"), 
-            notificationOccurred: () => console.log("notifica") 
-        },
-        MainButton: {
-            setText: (t) => console.log("MainButton: " + t),
-            show: () => console.log("show button"),
-            hide: () => console.log("hide button"),
-            onClick: () => {}
-        }
-    }};
-}
+// Fallback WebApp (fix schermo nero)
+window.Telegram = window.Telegram || { WebApp: {
+    ready: () => {}, expand: () => {}, initDataUnsafe: { user: { id: 123 } },
+    sendData: (data) => alert("Punti: " + data), HapticFeedback: { impactOccurred: () => {}, notificationOccurred: () => {} },
+    MainButton: { setText: (t) => {}, show: () => {}, onClick: () => {} }
+}};
 
-// Attiva WebApp (ora funziona sempre)
 Telegram.WebApp.ready();
 Telegram.WebApp.expand();
 
-let game, score = 0, speed = 4, lanes, currentLane = 1, scoreText, gameOver = false;
-let pills, powders, cops, junkies;
-
 const config = {
-    type: Phaser.AUTO,
-    parent: 'game',
-    width: window.innerWidth,
-    height: window.innerHeight,
-    backgroundColor: '#000',
-    physics: { default: 'arcade', arcade: { gravity: { y: 1000 } } },
+    type: Phaser.AUTO, parent: 'game', width: window.innerWidth, height: window.innerHeight,
+    backgroundColor: '#000', physics: { default: 'arcade', arcade: { gravity: { y: 1000 } } },
     scene: { preload, create, update }
 };
 
-function preload() {
-    // Suoni (opzionali – se non caricano non crasha)
-    this.load.on('fileerror', () => console.log("Suono non trovato – ok"));
-    this.load.audio('kick', 'https://freesound.org/data/previews/612/612610_5674468-lq.mp3');
-    this.load.audio('collect', 'https://freesound.org/data/previews/276/276237_5123856-lq.mp3');
-    this.load.audio('gameover', 'https://freesound.org/data/previews/657/657424_12029781-lq.mp3');
-}
+let score = 0, speed = 4, lanes = [], currentLane = 1, scoreText, gameOver = false;
+let pills = [], powders = [], cops = [], junkies = [];
+
+function preload() {}
 
 function create() {
-    try { this.sound.add('kick', { loop: true, volume: 0.3 }).play(); } catch(e) {}
-
     lanes = [this.scale.height * 0.75, this.scale.height * 0.5, this.scale.height * 0.25];
     
-    // Player punk
-    player = this.add.graphics();
-    drawPlayer.call(this);
+    // Player
+    let playerGfx = this.add.graphics();
+    playerGfx.fillStyle(0xff00ff).fillCircle(0, 0, 30);
+    playerGfx.fillStyle(0x00ff00).fillTriangle(-20, -40, 0, -70, 20, -40);
+    playerGfx.fillStyle(0xffffff).fillCircle(-10, -5, 5).fillCircle(10, -5, 5);
+    let player = this.physics.add.existing(playerGfx);
     player.setPosition(150, lanes[1]);
-    this.physics.add.existing(player);
     player.body.setSize(60, 100);
 
     // Gruppi
@@ -93,7 +62,7 @@ function create() {
     // Spawn
     this.time.addEvent({ delay: 1200, callback: spawnStuff, callbackScope: this, loop: true });
 
-    // Input touch
+    // Input
     this.input.on('pointerdown', pointer => {
         if (pointer.x < this.scale.width / 2) changeLane(-1);
         else changeLane(1);
@@ -102,7 +71,7 @@ function create() {
         if (pointer.downTime < 300) jump();
     });
 
-    // Bottone Salva Punti
+    // Bottone
     Telegram.WebApp.MainButton.setText("SALVA PUNTI").show().onClick(savePoints);
 }
 
@@ -111,28 +80,15 @@ function update() {
     score += 0.1;
     scoreText.setText('SCORE: ' + Math.floor(score));
     speed = 4 + score / 1000;
-
     [pills, powders, cops, junkies].forEach(g => {
         g.children.entries.forEach(o => {
             o.x -= speed;
             if (o.x < -100) o.destroy();
         });
     });
-
     if (Math.floor(score) % 1000 === 0 && Math.floor(score) > 0) {
         Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     }
-}
-
-function drawPlayer() {
-    player.clear();
-    player.fillStyle(0xff00ff);
-    player.fillCircle(0, 0, 30);
-    player.fillStyle(0x00ff00);
-    player.fillTriangle(-20, -40, 0, -70, 20, -40);
-    player.fillStyle(0xffffff);
-    player.fillCircle(-10, -5, 5);
-    player.fillCircle(10, -5, 5);
 }
 
 function changeLane(dir) {
@@ -141,7 +97,7 @@ function changeLane(dir) {
 }
 
 function jump() {
-    if (player.body.touching.down || player.body.onFloor()) {
+    if (player.body.touching.down) {
         player.body.setVelocityY(-500);
         Telegram.WebApp.HapticFeedback.impactOccurred('medium');
     }
@@ -152,7 +108,6 @@ function spawnStuff() {
     const y = lanes[lane];
     const x = this.scale.width + 100;
     const r = Math.random();
-
     if (r < 0.25) {
         let pill = this.add.circle(x, y, 15, 0xff0000);
         this.physics.add.existing(pill);
@@ -177,7 +132,6 @@ function spawnStuff() {
 function collectPill(_, pill) {
     pill.destroy();
     score += 10;
-    try { this.sound.play('collect'); } catch(e) {}
     Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     savePoints();
 }
@@ -186,14 +140,12 @@ function collectPowder(_, powder) {
     powder.destroy();
     score += 25;
     speed += 1;
-    try { this.sound.play('collect'); } catch(e) {}
     Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     savePoints();
 }
 
 function gameOver() {
     gameOver = true;
-    try { this.sound.play('gameover'); } catch(e) {}
     Telegram.WebApp.HapticFeedback.notificationOccurred('error');
     this.add.text(this.scale.width/2, this.scale.height/2 - 100, 'GAME OVER', { fontSize: '64px', fill: '#f00' }).setOrigin(0.5);
     this.add.text(this.scale.width/2, this.scale.height/2, 'Score: ' + Math.floor(score), { fontSize: '48px', fill: '#fff' }).setOrigin(0.5);
