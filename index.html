@@ -32,8 +32,10 @@ const config = {
     physics: { default: 'arcade', arcade: { gravity: { y: 1000 } } },
     scene: { preload, create, update }
 };
-let score = 0, speed = 4, lanes = [], currentLane = 1, scoreText, gameOver = false;
+let score = 0, speed = 4, lanes = [], currentLane = 1, scoreText, isGameOver = false;
 let pills = [], powders = [], cops = [], junkies = [];
+let player; // dichiarato nello scope esterno così tutte le funzioni possono accedervi
+
 function preload() {}
 function create() {
     lanes = [this.scale.height * 0.75, this.scale.height * 0.5, this.scale.height * 0.25];
@@ -41,7 +43,8 @@ function create() {
     playerGfx.fillStyle(0xff00ff).fillCircle(0, 0, 30);
     playerGfx.fillStyle(0x00ff00).fillTriangle(-20, -40, 0, -70, 20, -40);
     playerGfx.fillStyle(0xffffff).fillCircle(-10, -5, 5).fillCircle(10, -5, 5);
-    let player = this.physics.add.existing(playerGfx);
+    // assegna all'oggetto player nello scope esterno
+    player = this.physics.add.existing(playerGfx);
     player.setPosition(150, lanes[1]);
     player.body.setSize(60, 100);
     pills = this.physics.add.group();
@@ -50,8 +53,9 @@ function create() {
     junkies = this.physics.add.group();
     this.physics.add.overlap(player, pills, collectPill, null, this);
     this.physics.add.overlap(player, powders, collectPowder, null, this);
-    this.physics.add.collider(player, cops, gameOver, null, this);
-    this.physics.add.collider(player, junkies, gameOver, null, this);
+    // usa la funzione handleGameOver come callback
+    this.physics.add.collider(player, cops, handleGameOver, null, this);
+    this.physics.add.collider(player, junkies, handleGameOver, null, this);
     scoreText = this.add.text(20, 20, 'SCORE: 0', { fontSize: '32px', fill: '#0f0' }).setDepth(10);
     this.time.addEvent({ delay: 1200, callback: spawnStuff, callbackScope: this, loop: true });
     this.input.on('pointerdown', pointer => {
@@ -64,7 +68,7 @@ function create() {
     Telegram.WebApp.MainButton.setText("SALVA PUNTI").show().onClick(savePoints);
 }
 function update() {
-    if (gameOver) return;
+    if (isGameOver) return;
     score += 0.1;
     scoreText.setText('SCORE: ' + Math.floor(score));
     speed = 4 + score / 1000;
@@ -80,10 +84,10 @@ function update() {
 }
 function changeLane(dir) {
     currentLane = Phaser.Math.Clamp(currentLane + dir, 0, 2);
-    player.y = lanes[currentLane];
+    if (player) player.y = lanes[currentLane];
 }
 function jump() {
-    if (player.body.touching.down) {
+    if (player && player.body && player.body.touching && player.body.touching.down) {
         player.body.setVelocityY(-500);
         Telegram.WebApp.HapticFeedback.impactOccurred('medium');
     }
@@ -126,8 +130,8 @@ function collectPowder(_, powder) {
     Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     savePoints();
 }
-function gameOver() {
-    gameOver = true;
+function handleGameOver() {
+    isGameOver = true;
     Telegram.WebApp.HapticFeedback.notificationOccurred('error');
     this.add.text(this.scale.width/2, this.scale.height/2 - 100, 'GAME OVER', { fontSize: '64px', fill: '#f00' }).setOrigin(0.5);
     this.add.text(this.scale.width/2, this.scale.height/2, 'Score: ' + Math.floor(score), { fontSize: '48px', fill: '#fff' }).setOrigin(0.5);
