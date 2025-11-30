@@ -6,23 +6,29 @@
     <title>PUNK RUNNER TEKNO</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
-    <style>body{margin:0;padding:0;overflow:hidden;background:#000;} #game{width:100vw;height:100vh;}</style>
+    <style>
+        body { margin:0; padding:0; overflow:hidden; background:#000; }
+        #game { width:100vw; height:100vh; }
+    </style>
 </head>
 <body>
 <div id="game"></div>
 <script>
+// Fallback per test fuori Telegram
 if (!window.Telegram?.WebApp) {
     window.Telegram = { WebApp: {
         ready: () => console.log("WebApp ready"),
         expand: () => console.log("expand"),
         initDataUnsafe: { user: { id: 123456789 } },
-        sendData: (data) => alert("Punti inviati: " + data),
+        sendData: (data) => alert("PUNTI INVIATI: " + data),
         HapticFeedback: { impactOccurred: () => {}, notificationOccurred: () => {} },
         MainButton: { setText: (t) => {}, show: () => {}, onClick: () => {} }
     }};
 }
+
 Telegram.WebApp.ready();
 Telegram.WebApp.expand();
+
 const config = {
     type: Phaser.AUTO,
     parent: 'game',
@@ -32,32 +38,40 @@ const config = {
     physics: { default: 'arcade', arcade: { gravity: { y: 1000 } } },
     scene: { preload, create, update }
 };
-let score = 0, speed = 4, lanes = [], currentLane = 1, scoreText, isGameOver = false;
-let pills = [], powders = [], cops = [], junkies = [];
-let player; // dichiarato nello scope esterno così tutte le funzioni possono accedervi
+
+let score = 0, speed = 4, lanes = [], currentLane = 1, scoreText, gameOver = false;
+let player;
 
 function preload() {}
+
 function create() {
     lanes = [this.scale.height * 0.75, this.scale.height * 0.5, this.scale.height * 0.25];
-    let playerGfx = this.add.graphics();
+
+    // Player punk
+    const playerGfx = this.add.graphics();
     playerGfx.fillStyle(0xff00ff).fillCircle(0, 0, 30);
     playerGfx.fillStyle(0x00ff00).fillTriangle(-20, -40, 0, -70, 20, -40);
     playerGfx.fillStyle(0xffffff).fillCircle(-10, -5, 5).fillCircle(10, -5, 5);
-    // assegna all'oggetto player nello scope esterno
+    
     player = this.physics.add.existing(playerGfx);
     player.setPosition(150, lanes[1]);
     player.body.setSize(60, 100);
-    pills = this.physics.add.group();
-    powders = this.physics.add.group();
-    cops = this.physics.add.group();
-    junkies = this.physics.add.group();
+
+    // Gruppi
+    const pills = this.physics.add.group();
+    const powders = this.physics.add.group();
+    const cops = this.physics.add.group();
+    const junkies = this.physics.add.group();
+
     this.physics.add.overlap(player, pills, collectPill, null, this);
     this.physics.add.overlap(player, powders, collectPowder, null, this);
-    // usa la funzione handleGameOver come callback
-    this.physics.add.collider(player, cops, handleGameOver, null, this);
-    this.physics.add.collider(player, junkies, handleGameOver, null, this);
+    this.physics.add.collider(player, cops, gameOver, null, this);
+    this.physics.add.collider(player, junkies, gameOver, null, this);
+
     scoreText = this.add.text(20, 20, 'SCORE: 0', { fontSize: '32px', fill: '#0f0' }).setDepth(10);
+
     this.time.addEvent({ delay: 1200, callback: spawnStuff, callbackScope: this, loop: true });
+
     this.input.on('pointerdown', pointer => {
         if (pointer.x < this.scale.width / 2) changeLane(-1);
         else changeLane(1);
@@ -65,33 +79,29 @@ function create() {
     this.input.on('pointerup', pointer => {
         if (pointer.downTime < 300) jump();
     });
+
     Telegram.WebApp.MainButton.setText("SALVA PUNTI").show().onClick(savePoints);
 }
+
 function update() {
-    if (isGameOver) return;
+    if (gameOver) return;
     score += 0.1;
     scoreText.setText('SCORE: ' + Math.floor(score));
     speed = 4 + score / 1000;
-    [pills, powders, cops, junkies].forEach(g => {
-        g.children.entries.forEach(o => {
-            o.x -= speed;
-            if (o.x < -100) o.destroy();
-        });
-    });
-    if (Math.floor(score) % 1000 === 0 && Math.floor(score) > 0) {
-        Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-    }
 }
+
 function changeLane(dir) {
     currentLane = Phaser.Math.Clamp(currentLane + dir, 0, 2);
-    if (player) player.y = lanes[currentLane];
+    player.y = lanes[currentLane];
 }
+
 function jump() {
-    if (player && player.body && player.body.touching && player.body.touching.down) {
+    if (player.body.touching.down) {
         player.body.setVelocityY(-500);
         Telegram.WebApp.HapticFeedback.impactOccurred('medium');
     }
 }
+
 function spawnStuff() {
     const lane = Phaser.Math.Between(0, 2);
     const y = lanes[lane];
@@ -117,12 +127,14 @@ function spawnStuff() {
         junkies.add(junkie);
     }
 }
+
 function collectPill(_, pill) {
     pill.destroy();
     score += 10;
     Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     savePoints();
 }
+
 function collectPowder(_, powder) {
     powder.destroy();
     score += 25;
@@ -130,17 +142,20 @@ function collectPowder(_, powder) {
     Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     savePoints();
 }
-function handleGameOver() {
-    isGameOver = true;
+
+function gameOver() {
+    gameOver = true;
     Telegram.WebApp.HapticFeedback.notificationOccurred('error');
     this.add.text(this.scale.width/2, this.scale.height/2 - 100, 'GAME OVER', { fontSize: '64px', fill: '#f00' }).setOrigin(0.5);
     this.add.text(this.scale.width/2, this.scale.height/2, 'Score: ' + Math.floor(score), { fontSize: '48px', fill: '#fff' }).setOrigin(0.5);
     Telegram.WebApp.MainButton.setText("Riprova").show().onClick(() => location.reload());
 }
+
 function savePoints() {
     const teknoPoints = Math.min(Math.max(Math.floor(score / 100), 2), 15);
     Telegram.WebApp.sendData(JSON.stringify({ tekno_points: teknoPoints }));
 }
+
 new Phaser.Game(config);
 </script>
 </body>
