@@ -2,16 +2,25 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tekno Invaders</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
     <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            overscroll-behavior: none;
+        }
         body {
             margin: 0;
             padding: 0;
             background: #04060d;
             overflow: hidden;
             font-family: monospace;
+        }
+        canvas {
+            display: block;
         }
     </style>
 </head>
@@ -37,11 +46,27 @@ const LIFE_ASSET = 'data:image/svg+xml;utf8,' + encodeURIComponent(`
 </svg>
 `);
 
+const isTelegramWebApp = !!window.Telegram?.WebApp;
+if (isTelegramWebApp) {
+    try {
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
+        window.Telegram.WebApp.setBackgroundColor('#04060d');
+    } catch (err) {
+        console.warn('Telegram WebApp init fallita', err);
+    }
+}
+
+let scaleFactor = 1;
 const config = {
     type: Phaser.AUTO,
-    width: window.innerWidth,
-    height: window.innerHeight,
     backgroundColor: '#04060d',
+    scale: {
+        mode: Phaser.Scale.RESIZE,
+        width: window.innerWidth,
+        height: window.innerHeight,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    },
     physics: {
         default: 'arcade',
         arcade: {
@@ -80,6 +105,8 @@ let instructionText;
 let alienDirection = 2;
 let alienSpeed = 70;
 let waveLevel = 1;
+const ALIEN_ROWS = 4;
+const ALIEN_COLS = 8;
 const alienDrop = 40;
 const alienFireInterval = 1300; // ms
 const respawnDelay = 700; // ms
@@ -99,14 +126,16 @@ function preload() {
 }
 
 function create() {
+    scaleFactor = computeScale(this);
+
     // Sfondo animato
     bg = this.add.tileSprite(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 'background');
     bg.setScrollFactor(2);
-    bg.setTileScale(0.35, 0.35);
+    bg.setTileScale(0.35 * scaleFactor, 0.35 * scaleFactor);
 
     // Giocatore
-    player = this.physics.add.sprite(this.scale.width / 2, this.scale.height - 70, 'player');
-    player.setDisplaySize(160, 240);
+    player = this.physics.add.sprite(this.scale.width / 2, this.scale.height - 70 * scaleFactor, 'player');
+    player.setDisplaySize(160 * scaleFactor, 240 * scaleFactor);
     player.setOrigin(0.5, 0.5);
     player.setCollideWorldBounds(true);
     player.setDepth(2);
@@ -123,7 +152,10 @@ function create() {
     // Controlli
     cursors = this.input.keyboard.createCursorKeys();
     this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.input.on('pointermove', pointer => player.x = Phaser.Math.Clamp(pointer.x, 20, this.scale.width - 20));
+    this.input.on('pointermove', pointer => {
+        const margin = Math.max(20, player.displayWidth * 0.5 + 8);
+        player.x = Phaser.Math.Clamp(pointer.x, margin, this.scale.width - margin);
+    });
     this.input.on('pointerdown', () => {
         startMusic(this);
         tryFire(this.time.now);
@@ -135,13 +167,16 @@ function create() {
     this.physics.add.overlap(lifeDrops, player, collectLife, null, this);
 
     // UI
-    scoreText = this.add.text(16, 16, '', { fontSize: '18px', color: '#d8e9ff' }).setDepth(3);
-    levelText = this.add.text(16, 38, '', { fontSize: '16px', color: '#d8e9ff' }).setDepth(3);
+    const uiScale = Phaser.Math.Clamp(scaleFactor, 0.75, 1.1);
+    scoreText = this.add.text(16, 16, '', { fontSize: `${18 * uiScale}px`, color: '#d8e9ff' }).setDepth(3);
+    levelText = this.add.text(16, 38, '', { fontSize: `${16 * uiScale}px`, color: '#d8e9ff' }).setDepth(3);
     updateUI();
-    instructionText = this.add.text(this.scale.width / 2, this.scale.height - 32, 'Muovi con frecce o dito • SPAZIO/tap per sparare', {
-        fontSize: '15px',
+    instructionText = this.add.text(this.scale.width / 2, this.scale.height - 32 * uiScale, 'Muovi con frecce o dito - SPAZIO/tap per sparare', {
+        fontSize: `${15 * uiScale}px`,
         color: '#b7c8ff'
     }).setOrigin(0.5).setDepth(3);
+
+    applyScale(this);
 
     // Resize
     this.scale.on('resize', ({ width, height }) => handleResize(this, width, height));
@@ -210,14 +245,14 @@ function update(time, delta) {
             hitEdge = true;
         }
         // Se scendono troppo, perdi una vita
-        if (alien.y > this.scale.height - 120) {
+        if (alien.y > this.scale.height - 120 * scaleFactor) {
             breached = true;
         }
     });
 
     if (hitEdge) {
         alienDirection *= -1;
-        aliens.children.each(alien => alien.y += alienDrop);
+        aliens.children.each(alien => alien.y += alienDrop * scaleFactor);
         alienSpeed = Math.min(alienSpeed + 3, 320);
     }
 
@@ -248,7 +283,7 @@ function tryFire(time) {
     bullet.setVisible(true);
     bullet.body.enable = true;
     bullet.body.reset(player.x, player.y - player.displayHeight * 0.5);
-    bullet.setDisplaySize(80, 80);
+    bullet.setDisplaySize(80 * scaleFactor, 80 * scaleFactor);
     bullet.setOrigin(0.5, 0.5);
     tuneRectBody(bullet, 1, 1);
     bullet.setVelocityY(-520);
@@ -283,7 +318,7 @@ function fireAlienBullet() {
     bullet.setVisible(true);
     bullet.body.enable = true;
     bullet.body.reset(shooter.x, shooter.y + shooter.displayHeight * 0.5);
-    bullet.setDisplaySize(80, 80);
+    bullet.setDisplaySize(80 * scaleFactor, 80 * scaleFactor);
     bullet.setOrigin(0.5, 0.5);
     tuneRectBody(bullet, 1, 1);
     bullet.setVelocityY(240);
@@ -297,7 +332,7 @@ function spawnLifeDrop() {
     drop.setActive(true);
     drop.setVisible(true);
     drop.body.enable = true;
-    drop.setDisplaySize(120, 120);
+    drop.setDisplaySize(120 * scaleFactor, 120 * scaleFactor);
     drop.setOrigin(0.5, 0.5);
     tuneRectBody(drop, 1, 1);
     drop.setVelocityY(160);
@@ -321,6 +356,7 @@ function startNextWave(scene) {
         alienSpeed = Math.min(alienSpeed + 10, 320);
         alienDirection = 1;
         buildAlienGrid(scene);
+        applyScale(scene);
         pendingNextWave = false;
         updateUI();
         showToast(scene, `Nuova ondata! Livello ${waveLevel} (+10 velocita)`);
@@ -328,20 +364,21 @@ function startNextWave(scene) {
 }
 
 function buildAlienGrid(scene) {
-    const rows = 4;
-    const cols = 8;
-    const spacingX = 64;
-    const spacingY = 54;
-    const gridWidth = (cols - 1) * spacingX;
-    const startX = (scene.scale.width - gridWidth) / 2;
-    const startY = 80;
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            const alien = aliens.create(startX + c * spacingX, startY + r * spacingY, 'alien');
-            alien.setDisplaySize(200, 260);
+    const spacingX = scene.scale.width / (ALIEN_COLS + 1);
+    const alienW = Math.min(spacingX * 0.7, 160 * scaleFactor);
+    const alienH = alienW * 1.3;
+    const startY = 80 * scaleFactor + alienH * 0.5;
+    for (let r = 0; r < ALIEN_ROWS; r++) {
+        for (let c = 0; c < ALIEN_COLS; c++) {
+            const x = spacingX * (c + 1);
+            const y = startY + r * spacingY;
+            const alien = aliens.create(x, y, 'alien');
+            alien.setDisplaySize(alienW, alienH);
             alien.setOrigin(0.5, 0.5);
             tuneRectBody(alien, 1, 1);
             alien.setDepth(1);
+            alien.setData('row', r);
+            alien.setData('col', c);
         }
     }
 }
@@ -360,7 +397,7 @@ function loseLife() {
     player.disableBody(true, true);
     alienBullets.children.each(b => b.disableBody(true, true));
     this.time.delayedCall(respawnDelay, () => {
-        player.enableBody(true, this.scale.width / 2, this.scale.height - 70, true, true);
+        player.enableBody(true, this.scale.width / 2, this.scale.height - 70 * scaleFactor, true, true);
         player.setVelocity(0);
         player.setAlpha(0.6);
         player.setDepth(2);
@@ -405,7 +442,7 @@ function restart(scene) {
     lifeDropCollected = false;
     lifeDropStartTime = scene.time.now;
     pendingNextWave = false;
-    player.enableBody(true, scene.scale.width / 2, scene.scale.height - 70, true, true);
+    player.enableBody(true, scene.scale.width / 2, scene.scale.height - 70 * scaleFactor, true, true);
     player.setVelocity(0);
     player.setAlpha(1);
     player.setDepth(2);
@@ -418,7 +455,8 @@ function restart(scene) {
     lifeDrops.clear(true, true);
     buildAlienGrid(scene);
     updateUI();
-    instructionText.setText('Muovi con frecce o dito • SPAZIO/tap per sparare');
+    instructionText.setText('Muovi con frecce o dito - SPAZIO/tap per sparare');
+    applyScale(scene);
     endUI.forEach(item => item.destroy());
     endUI = [];
 }
@@ -451,12 +489,49 @@ function showToast(scene, text) {
 
 function handleResize(scene, width, height) {
     scene.physics.world.setBounds(0, 0, width, height);
-    bg.setSize(width, height);
-    bg.setPosition(width / 2, height / 2);
+    scaleFactor = computeScale(scene);
+    applyScale(scene);
     scoreText.setPosition(16, 16);
     levelText.setPosition(16, 38);
-    instructionText.setPosition(width / 2, height - 32);
-    player.setY(height - 70);
+}
+
+function computeScale(scene) {
+    const base = Math.min(scene.scale.width / 1080, scene.scale.height / 1920);
+    return Phaser.Math.Clamp(base, 0.55, 1.1);
+}
+
+function applyScale(scene) {
+    const uiScale = Phaser.Math.Clamp(scaleFactor, 0.75, 1.1);
+    bg.setSize(scene.scale.width, scene.scale.height);
+    bg.setPosition(scene.scale.width / 2, scene.scale.height / 2);
+    bg.setTileScale(0.35 * scaleFactor, 0.35 * scaleFactor);
+
+    if (player) {
+        player.setDisplaySize(160 * scaleFactor, 240 * scaleFactor);
+        player.setY(scene.scale.height - 70 * scaleFactor);
+        tuneRectBody(player, 1, 1);
+        player.setCollideWorldBounds(true);
+    }
+
+    const spacingX = scene.scale.width / (ALIEN_COLS + 1);
+    const alienW = Math.min(spacingX * 0.7, 160 * scaleFactor);
+    const alienH = alienW * 1.3;
+    aliens.children.each(alien => {
+        if (!alien.active) return;
+        alien.setDisplaySize(alienW, alienH);
+        tuneRectBody(alien, 1, 1);
+        const margin = alienW * 0.5 + 12;
+        alien.x = Phaser.Math.Clamp(alien.x, margin, scene.scale.width - margin);
+    });
+
+    bullets.children.each(b => { if (b.active) b.setDisplaySize(80 * scaleFactor, 80 * scaleFactor); });
+    alienBullets.children.each(b => { if (b.active) b.setDisplaySize(80 * scaleFactor, 80 * scaleFactor); });
+    lifeDrops.children.each(l => { if (l.active) l.setDisplaySize(120 * scaleFactor, 120 * scaleFactor); });
+
+    scoreText.setFontSize(18 * uiScale);
+    levelText.setFontSize(16 * uiScale);
+    instructionText.setFontSize(15 * uiScale);
+    instructionText.setPosition(scene.scale.width / 2, scene.scale.height - 32 * uiScale);
 }
 
 function tuneCircleBody(sprite, factor = 0.4) {
