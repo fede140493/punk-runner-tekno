@@ -1,162 +1,552 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>PUNK RUNNER TEKNO</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <title>Tekno Invaders</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
     <style>
-        body { margin:0; padding:0; overflow:hidden; background:#000; }
-        #game { width:100vw; height:100vh; }
+        body {
+            margin: 0;
+            padding: 0;
+            background: #04060d;
+            overflow: hidden;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
-<div id="game"></div>
 <script>
-// Fallback per test fuori Telegram
-if (!window.Telegram?.WebApp) {
-    window.Telegram = { WebApp: {
-        ready: () => console.log("WebApp ready"),
-        expand: () => console.log("expand"),
-        initDataUnsafe: { user: { id: 123456789 } },
-        sendData: (data) => alert("PUNTI INVIATI: " + data),
-        HapticFeedback: { impactOccurred: () => {}, notificationOccurred: () => {} },
-        MainButton: { setText: (t) => {}, show: () => {}, onClick: () => {} }
-    }};
-}
+// Asset Tekno Invaders locali (cartella ./assets). Cambiali se preferisci altri file o URL.
+const CUSTOM_ASSETS = {
+    player: 'assets/player.bmp',
+    alien: 'assets/carabiniere.bmp',
+    bullet: 'assets/pasticca.bmp',
+    alienBullet: 'assets/bulletalien.bmp',
+    background: 'assets/fond.bmp',
+    extraLife: 'assets/life.bmp', // icona vita
+    bgm: 'assets/System Of A Down - BYOB [8-bit] +mp3 download!.mp3' // musica di sottofondo
+};
 
-Telegram.WebApp.ready();
-Telegram.WebApp.expand();
+const PLACEHOLDER_ASSETS = createPlaceholderAssets();
+const LIFE_ASSET = 'data:image/svg+xml;utf8,' + encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#0b0e1a"/>
+  <path d="M32 52c-1 0-2-.4-2.8-1.2L16 37.2C11 32 11 24 16.3 19.4a9.6 9.6 0 0 1 13.4.7l2.3 2.4 2.3-2.4a9.6 9.6 0 0 1 13.4-.7C53 24 53 32 48 37.2L34.8 50.8c-.8.8-1.8 1.2-2.8 1.2Z" fill="#ff4d6d"/>
+  <path d="M32 49c-.7 0-1.4-.3-1.9-.8L18.6 36.7c-3.7-3.6-3.7-9.6 0-13a7.3 7.3 0 0 1 10.2.5l3.2 3.2 3.2-3.2a7.3 7.3 0 0 1 10.2-.5c3.7 3.4 3.7 9.4 0 13L33.9 48.2c-.5.5-1.2.8-1.9.8Z" fill="#ffd7de"/>
+</svg>
+`);
 
 const config = {
     type: Phaser.AUTO,
-    parent: 'game',
     width: window.innerWidth,
     height: window.innerHeight,
-    backgroundColor: '#000',
-    physics: { default: 'arcade', arcade: { gravity: { y: 1000 } } },
+    backgroundColor: '#04060d',
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 0 },
+            debug: false
+        }
+    },
     scene: { preload, create, update }
 };
 
-let score = 0, speed = 4, lanes = [], currentLane = 1, scoreText, gameOver = false;
-let player;
+let game = new Phaser.Game(config);
 
-function preload() {}
+// Stato di gioco
+let player;
+let cursors;
+let bullets;
+let aliens;
+let alienBullets;
+let lifeDrops;
+let bg;
+let score = 0;
+let scoreText;
+let levelText;
+let lives = 3;
+let lastFired = 0;
+let lastAlienShot = 0;
+let bgmTrack;
+let playerInvulnerable = false;
+let respawning = false;
+let lifeDropSpawned = false;
+let lifeDropCollected = false;
+let lifeDropStartTime = 0;
+let pendingNextWave = false;
+let gameOver = false;
+let instructionText;
+let alienDirection = 2;
+let alienSpeed = 70;
+let waveLevel = 1;
+const alienDrop = 40;
+const alienFireInterval = 1300; // ms
+const respawnDelay = 700; // ms
+const respawnInvuln = 1200; // ms
+const lifeDropDelay = 12000; // ms prima di far cadere la vita bonus
+let endUI = [];
+
+function preload() {
+    // Usa le immagini personalizzate se definite, altrimenti i placeholder.
+    this.load.image('player', CUSTOM_ASSETS.player || PLACEHOLDER_ASSETS.player);
+    this.load.image('alien', CUSTOM_ASSETS.alien || PLACEHOLDER_ASSETS.alien);
+    this.load.image('bullet', CUSTOM_ASSETS.bullet || PLACEHOLDER_ASSETS.bullet);
+    this.load.image('alienBullet', CUSTOM_ASSETS.alienBullet || CUSTOM_ASSETS.bullet || PLACEHOLDER_ASSETS.bullet);
+    this.load.image('background', CUSTOM_ASSETS.background || PLACEHOLDER_ASSETS.background);
+    this.load.image('life', CUSTOM_ASSETS.extraLife || LIFE_ASSET);
+    this.load.audio('bgm', CUSTOM_ASSETS.bgm);
+}
 
 function create() {
-    lanes = [this.scale.height * 0.75, this.scale.height * 0.5, this.scale.height * 0.25];
+    // Sfondo animato
+    bg = this.add.tileSprite(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 'background');
+    bg.setScrollFactor(2);
+    bg.setTileScale(0.35, 0.35);
 
-    // Player punk
-    const playerGfx = this.add.graphics();
-    playerGfx.fillStyle(0xff00ff).fillCircle(0, 0, 30);
-    playerGfx.fillStyle(0x00ff00).fillTriangle(-20, -40, 0, -70, 20, -40);
-    playerGfx.fillStyle(0xffffff).fillCircle(-10, -5, 5).fillCircle(10, -5, 5);
-    
-    player = this.physics.add.existing(playerGfx);
-    player.setPosition(150, lanes[1]);
-    player.body.setSize(60, 100);
+    // Giocatore
+    player = this.physics.add.sprite(this.scale.width / 2, this.scale.height - 70, 'player');
+    player.setDisplaySize(160, 240);
+    player.setOrigin(0.5, 0.5);
+    player.setCollideWorldBounds(true);
+    player.setDepth(2);
+    tuneRectBody(player, 1, 1);
 
     // Gruppi
-    const pills = this.physics.add.group();
-    const powders = this.physics.add.group();
-    const cops = this.physics.add.group();
-    const junkies = this.physics.add.group();
+    bullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 20, runChildUpdate: true });
+    alienBullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 40, runChildUpdate: true });
+    lifeDrops = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image, maxSize: 1, runChildUpdate: true });
+    aliens = this.physics.add.group({ key: 'alien' });
+    buildAlienGrid(this);
+    lifeDropStartTime = this.time.now;
 
-    this.physics.add.overlap(player, pills, collectPill, null, this);
-    this.physics.add.overlap(player, powders, collectPowder, null, this);
-    this.physics.add.collider(player, cops, gameOver, null, this);
-    this.physics.add.collider(player, junkies, gameOver, null, this);
-
-    scoreText = this.add.text(20, 20, 'SCORE: 0', { fontSize: '32px', fill: '#0f0' }).setDepth(10);
-
-    this.time.addEvent({ delay: 1200, callback: spawnStuff, callbackScope: this, loop: true });
-
-    this.input.on('pointerdown', pointer => {
-        if (pointer.x < this.scale.width / 2) changeLane(-1);
-        else changeLane(1);
-    });
-    this.input.on('pointerup', pointer => {
-        if (pointer.downTime < 300) jump();
+    // Controlli
+    cursors = this.input.keyboard.createCursorKeys();
+    this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.input.on('pointermove', pointer => player.x = Phaser.Math.Clamp(pointer.x, 20, this.scale.width - 20));
+    this.input.on('pointerdown', () => {
+        startMusic(this);
+        tryFire(this.time.now);
     });
 
-    Telegram.WebApp.MainButton.setText("SALVA PUNTI").show().onClick(savePoints);
+    // Collisioni
+    this.physics.add.overlap(bullets, aliens, bulletHitAlien, null, this);
+    this.physics.add.overlap(alienBullets, player, playerHitByAlien, null, this);
+    this.physics.add.overlap(lifeDrops, player, collectLife, null, this);
+
+    // UI
+    scoreText = this.add.text(16, 16, '', { fontSize: '18px', color: '#d8e9ff' }).setDepth(3);
+    levelText = this.add.text(16, 38, '', { fontSize: '16px', color: '#d8e9ff' }).setDepth(3);
+    updateUI();
+    instructionText = this.add.text(this.scale.width / 2, this.scale.height - 32, 'Muovi con frecce o dito • SPAZIO/tap per sparare', {
+        fontSize: '15px',
+        color: '#b7c8ff'
+    }).setOrigin(0.5).setDepth(3);
+
+    // Resize
+    this.scale.on('resize', ({ width, height }) => handleResize(this, width, height));
+    window.addEventListener('resize', () => game.scale.resize(window.innerWidth, window.innerHeight));
 }
 
-function update() {
+function update(time, delta) {
     if (gameOver) return;
-    score += 0.1;
-    scoreText.setText('SCORE: ' + Math.floor(score));
-    speed = 4 + score / 1000;
-}
 
-function changeLane(dir) {
-    currentLane = Phaser.Math.Clamp(currentLane + dir, 0, 2);
-    player.y = lanes[currentLane];
-}
+    // Sfondo
+    bg.tilePositionY -= 0.3 * (delta / 16.67);
 
-function jump() {
-    if (player.body.touching.down) {
-        player.body.setVelocityY(-500);
-        Telegram.WebApp.HapticFeedback.impactOccurred('medium');
-    }
-}
-
-function spawnStuff() {
-    const lane = Phaser.Math.Between(0, 2);
-    const y = lanes[lane];
-    const x = this.scale.width + 100;
-    const r = Math.random();
-    if (r < 0.25) {
-        let pill = this.add.circle(x, y, 15, 0xff0000);
-        this.physics.add.existing(pill);
-        pills.add(pill);
-    } else if (r < 0.45) {
-        let powder = this.add.rectangle(x, y, 60, 10, 0xffffff);
-        this.physics.add.existing(powder);
-        powders.add(powder);
-    } else if (r < 0.7) {
-        let cop = this.add.rectangle(x, y, 50, 80, 0x0000ff);
-        this.add.triangle(x, y-50, 50, 0, -50, 0, 0, -40, 0x000000);
-        this.physics.add.existing(cop);
-        cops.add(cop);
+    // Movimento giocatore
+    const moveSpeed = 280;
+    if (cursors.left.isDown) {
+        player.setVelocityX(-moveSpeed);
+    } else if (cursors.right.isDown) {
+        player.setVelocityX(moveSpeed);
     } else {
-        let junkie = this.add.rectangle(x, y, 30, 100, 0x8b4513);
-        this.add.line(x+20, y-20, 40, 0, 0xffffff);
-        this.physics.add.existing(junkie);
-        junkies.add(junkie);
+        player.setVelocityX(0);
+    }
+
+    // Fuoco
+    if (Phaser.Input.Keyboard.JustDown(cursors.space)) {
+        tryFire(time);
+    }
+
+    // Aggiorna proiettili fuori schermo
+    bullets.children.each(b => {
+        if (b.active && b.y < -30) {
+            b.disableBody(true, true);
+        }
+    });
+    alienBullets.children.each(b => {
+        if (b.active && b.y > this.scale.height + 30) {
+            b.disableBody(true, true);
+        }
+    });
+    lifeDrops.children.each(l => {
+        if (l.active && l.y > this.scale.height + 30) {
+            l.disableBody(true, true);
+        }
+    });
+
+    // Fuoco nemico
+    if (time > lastAlienShot + alienFireInterval && aliens.countActive() > 0) {
+        fireAlienBullet();
+        lastAlienShot = time;
+    }
+
+    // Drop vita unico
+    if (!lifeDropSpawned && !lifeDropCollected && time > lifeDropStartTime + lifeDropDelay && aliens.countActive() > 0) {
+        spawnLifeDrop();
+        lifeDropSpawned = true;
+    }
+
+    // Movimento alieni a stormo
+    const dx = alienDirection * alienSpeed * (delta / 1000);
+    let hitEdge = false;
+    const leftLimit = 24;
+    const rightLimit = this.scale.width - 24;
+    let breached = false;
+    aliens.children.each(alien => {
+        alien.x += dx;
+        if (alien.x < leftLimit || alien.x > rightLimit) {
+            hitEdge = true;
+        }
+        // Se scendono troppo, perdi una vita
+        if (alien.y > this.scale.height - 120) {
+            breached = true;
+        }
+    });
+
+    if (hitEdge) {
+        alienDirection *= -1;
+        aliens.children.each(alien => alien.y += alienDrop);
+        alienSpeed = Math.min(alienSpeed + 3, 320);
+    }
+
+    if (breached) {
+        loseLife.call(this);
+    }
+
+    // Vittoria: nuova ondata
+    if (aliens.countActive() === 0) {
+        startNextWave(this);
     }
 }
 
-function collectPill(_, pill) {
-    pill.destroy();
+function startMusic(scene) {
+    if (bgmTrack && bgmTrack.isPlaying) return;
+    if (!bgmTrack) {
+        bgmTrack = scene.sound.add('bgm', { loop: true, volume: 0.45 });
+    }
+    bgmTrack.play();
+}
+
+function tryFire(time) {
+    const cooldown = 300;
+    if (time < lastFired + cooldown) return;
+    const bullet = bullets.get(player.x, player.y - player.displayHeight * 0.5, 'bullet');
+    if (!bullet) return;
+    bullet.setActive(true);
+    bullet.setVisible(true);
+    bullet.body.enable = true;
+    bullet.body.reset(player.x, player.y - player.displayHeight * 0.5);
+    bullet.setDisplaySize(80, 80);
+    bullet.setOrigin(0.5, 0.5);
+    tuneRectBody(bullet, 1, 1);
+    bullet.setVelocityY(-520);
+    bullet.setDepth(2);
+    lastFired = time;
+}
+
+function bulletHitAlien(bullet, alien) {
+    if (!bullet.active || !alien.active) return;
+    bullet.disableBody(true, true);
+    alien.disableBody(true, true);
     score += 10;
-    Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-    savePoints();
+    updateUI();
+    if (aliens.countActive() === 0) {
+        startNextWave(this);
+    }
 }
 
-function collectPowder(_, powder) {
-    powder.destroy();
-    score += 25;
-    speed += 1;
-    Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-    savePoints();
+function playerHitByAlien(alienBullet, playerSprite) {
+    if (gameOver || !alienBullet.active || respawning || playerInvulnerable) return;
+    alienBullet.disableBody(true, true);
+    loseLife.call(this);
 }
 
-function gameOver() {
+function fireAlienBullet() {
+    const shooters = aliens.getChildren().filter(a => a.active);
+    if (shooters.length === 0) return;
+    const shooter = Phaser.Utils.Array.GetRandom(shooters);
+    const bullet = alienBullets.get(shooter.x, shooter.y + shooter.displayHeight * 0.5, 'alienBullet');
+    if (!bullet) return;
+    bullet.setActive(true);
+    bullet.setVisible(true);
+    bullet.body.enable = true;
+    bullet.body.reset(shooter.x, shooter.y + shooter.displayHeight * 0.5);
+    bullet.setDisplaySize(80, 80);
+    bullet.setOrigin(0.5, 0.5);
+    tuneRectBody(bullet, 1, 1);
+    bullet.setVelocityY(240);
+    bullet.setDepth(2);
+}
+
+function spawnLifeDrop() {
+    const x = Phaser.Math.Between(40, Math.max(40, game.scale.width - 40));
+    const drop = lifeDrops.get(x, -30, 'life');
+    if (!drop) return;
+    drop.setActive(true);
+    drop.setVisible(true);
+    drop.body.enable = true;
+    drop.setDisplaySize(120, 120);
+    drop.setOrigin(0.5, 0.5);
+    tuneRectBody(drop, 1, 1);
+    drop.setVelocityY(160);
+    drop.setDepth(2);
+}
+
+function collectLife(playerSprite, drop) {
+    if (!drop.active || gameOver) return;
+    drop.disableBody(true, true);
+    lifeDropCollected = true;
+    lives += 1;
+    updateUI();
+    showToast(this, 'Extra life!');
+}
+
+function startNextWave(scene) {
+    if (pendingNextWave) return;
+    pendingNextWave = true;
+    scene.time.delayedCall(150, () => {
+        waveLevel += 1;
+        alienSpeed = Math.min(alienSpeed + 10, 320);
+        alienDirection = 1;
+        buildAlienGrid(scene);
+        pendingNextWave = false;
+        updateUI();
+        showToast(scene, `Nuova ondata! Livello ${waveLevel} (+10 velocita)`);
+    });
+}
+
+function buildAlienGrid(scene) {
+    const rows = 4;
+    const cols = 8;
+    const spacingX = 64;
+    const spacingY = 54;
+    const gridWidth = (cols - 1) * spacingX;
+    const startX = (scene.scale.width - gridWidth) / 2;
+    const startY = 80;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const alien = aliens.create(startX + c * spacingX, startY + r * spacingY, 'alien');
+            alien.setDisplaySize(200, 260);
+            alien.setOrigin(0.5, 0.5);
+            tuneRectBody(alien, 1, 1);
+            alien.setDepth(1);
+        }
+    }
+}
+
+function loseLife() {
+    if (respawning || gameOver) return;
+    lives -= 1;
+    updateUI();
+    aliens.children.each(a => a.y -= 30); // respinge leggermente
+    if (lives <= 0) {
+        endGame.call(this, 'Game Over');
+        return;
+    }
+    respawning = true;
+    playerInvulnerable = true;
+    player.disableBody(true, true);
+    alienBullets.children.each(b => b.disableBody(true, true));
+    this.time.delayedCall(respawnDelay, () => {
+        player.enableBody(true, this.scale.width / 2, this.scale.height - 70, true, true);
+        player.setVelocity(0);
+        player.setAlpha(0.6);
+        player.setDepth(2);
+        player.setCollideWorldBounds(true);
+        player.setOrigin(0.5, 0.5);
+        tuneRectBody(player, 1, 1);
+        respawning = false;
+        this.time.delayedCall(respawnInvuln, () => {
+            player.setAlpha(1);
+            playerInvulnerable = false;
+        });
+    });
+}
+
+function endGame(message) {
     gameOver = true;
-    Telegram.WebApp.HapticFeedback.notificationOccurred('error');
-    this.add.text(this.scale.width/2, this.scale.height/2 - 100, 'GAME OVER', { fontSize: '64px', fill: '#f00' }).setOrigin(0.5);
-    this.add.text(this.scale.width/2, this.scale.height/2, 'Score: ' + Math.floor(score), { fontSize: '48px', fill: '#fff' }).setOrigin(0.5);
-    Telegram.WebApp.MainButton.setText("Riprova").show().onClick(() => location.reload());
+    instructionText.setText('Tap o R per ricominciare');
+    endUI.forEach(item => item.destroy());
+    endUI = [];
+    const overlay = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x000000, 0.55).setDepth(4);
+    const label = this.add.text(this.scale.width / 2, this.scale.height / 2, `${message}\nScore: ${score}`, {
+        fontSize: '28px',
+        color: '#f2f5ff',
+        align: 'center'
+    }).setOrigin(0.5).setDepth(5);
+    endUI.push(overlay, label);
+    this.input.keyboard.once('keydown-R', () => restart(this));
+    this.input.once('pointerdown', () => restart(this));
 }
 
-function savePoints() {
-    const teknoPoints = Math.min(Math.max(Math.floor(score / 100), 2), 15);
-    Telegram.WebApp.sendData(JSON.stringify({ tekno_points: teknoPoints }));
+function restart(scene) {
+    gameOver = false;
+    score = 0;
+    lives = 3;
+    alienSpeed = 50;
+    waveLevel = 1;
+    alienDirection = 1;
+    lastAlienShot = 0;
+    respawning = false;
+    playerInvulnerable = false;
+    lifeDropSpawned = false;
+    lifeDropCollected = false;
+    lifeDropStartTime = scene.time.now;
+    pendingNextWave = false;
+    player.enableBody(true, scene.scale.width / 2, scene.scale.height - 70, true, true);
+    player.setVelocity(0);
+    player.setAlpha(1);
+    player.setDepth(2);
+    player.setCollideWorldBounds(true);
+    player.setOrigin(0.5, 0.5);
+    tuneRectBody(player, 1, 1);
+    aliens.clear(true, true);
+    bullets.clear(true, true);
+    alienBullets.clear(true, true);
+    lifeDrops.clear(true, true);
+    buildAlienGrid(scene);
+    updateUI();
+    instructionText.setText('Muovi con frecce o dito • SPAZIO/tap per sparare');
+    endUI.forEach(item => item.destroy());
+    endUI = [];
 }
 
-new Phaser.Game(config);
+function updateUI() {
+    if (scoreText) {
+        scoreText.setText(`Score: ${score}   Lives: ${lives}`);
+    }
+    if (levelText) {
+        levelText.setText(`Level: ${waveLevel}`);
+    }
+}
+
+function showToast(scene, text) {
+    const toast = scene.add.text(scene.scale.width / 2, 56, text, {
+        fontSize: '18px',
+        color: '#ffe8a3',
+        backgroundColor: '#1f2b52',
+        padding: { x: 8, y: 6 }
+    }).setOrigin(0.5).setDepth(5);
+    scene.tweens.add({
+        targets: toast,
+        alpha: 0,
+        duration: 800,
+        ease: 'Sine.easeInOut',
+        yoyo: false,
+        onComplete: () => toast.destroy()
+    });
+}
+
+function handleResize(scene, width, height) {
+    scene.physics.world.setBounds(0, 0, width, height);
+    bg.setSize(width, height);
+    bg.setPosition(width / 2, height / 2);
+    scoreText.setPosition(16, 16);
+    levelText.setPosition(16, 38);
+    instructionText.setPosition(width / 2, height - 32);
+    player.setY(height - 70);
+}
+
+function tuneCircleBody(sprite, factor = 0.4) {
+    // Riduce l'hitbox circolare al fattore indicato rispetto alla dimensione visiva
+    const dim = Math.min(sprite.displayWidth, sprite.displayHeight);
+    const radius = dim * factor * 0.5;
+    const offset = (dim * 0.5) - radius;
+    sprite.body.setCircle(radius, offset, offset);
+}
+
+function tuneRectBody(sprite, wFactor = 0.7, hFactor = 0.7) {
+    // Hitbox rettangolare centrata rispetto alla sprite; limita per evitare offset errati
+    const bw = Math.min(sprite.displayWidth * wFactor, sprite.displayWidth);
+    const bh = Math.min(sprite.displayHeight * hFactor, sprite.displayHeight);
+    const ox = (sprite.displayWidth - bw) / 2;
+    const oy = (sprite.displayHeight - bh) / 2;
+    sprite.body.setSize(bw, bh);
+    sprite.body.setOffset(ox, oy);
+}
+
+function createPlaceholderAssets() {
+    const svgToDataURI = svg => 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    const placeholders = {};
+
+    const playerSVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="96" height="72" viewBox="0 0 96 72">
+          <defs>
+            <linearGradient id="g" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#7cf7ff"/>
+              <stop offset="100%" stop-color="#1f7bff"/>
+            </linearGradient>
+            <linearGradient id="flare" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#ffdf95"/>
+              <stop offset="100%" stop-color="#ff7b38"/>
+            </linearGradient>
+          </defs>
+          <rect width="96" height="72" rx="12" fill="#070b14"/>
+          <polygon points="48,6 86,52 48,44 10,52" fill="url(#g)" stroke="#b7d8ff" stroke-width="4"/>
+          <rect x="42" y="44" width="12" height="18" rx="3" fill="url(#flare)" opacity="0.9"/>
+          <rect x="28" y="30" width="40" height="10" rx="5" fill="#d4e8ff" opacity="0.6"/>
+        </svg>
+    `;
+
+    const alienSVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="72" height="52" viewBox="0 0 72 52">
+          <rect width="72" height="52" rx="10" fill="#0d0818"/>
+          <rect x="10" y="12" width="52" height="28" rx="6" fill="#ff6ad5"/>
+          <rect x="18" y="20" width="10" height="8" rx="2" fill="#ffeaf9"/>
+          <rect x="44" y="20" width="10" height="8" rx="2" fill="#ffeaf9"/>
+          <rect x="30" y="32" width="12" height="6" rx="2" fill="#0d0818"/>
+          <rect x="14" y="8" width="12" height="6" rx="3" fill="#31f4d4"/>
+          <rect x="46" y="8" width="12" height="6" rx="3" fill="#31f4d4"/>
+        </svg>
+    `;
+
+    const bulletSVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="40" viewBox="0 0 16 40">
+          <defs>
+            <linearGradient id="b" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#fff8a8"/>
+              <stop offset="100%" stop-color="#ff6a00"/>
+            </linearGradient>
+          </defs>
+          <rect x="2" y="4" width="12" height="32" rx="6" fill="url(#b)" stroke="#ffe6b0" stroke-width="1.5"/>
+          <rect x="5" y="2" width="6" height="8" rx="3" fill="#ffffff" opacity="0.8"/>
+        </svg>
+    `;
+
+    const bgSVG = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+          <rect width="160" height="160" fill="#04060d"/>
+          <circle cx="24" cy="18" r="2" fill="#7cf7ff"/>
+          <circle cx="90" cy="36" r="1.8" fill="#ffe6b0"/>
+          <circle cx="132" cy="20" r="2.4" fill="#ff6ad5"/>
+          <circle cx="58" cy="52" r="2" fill="#a2ffb8"/>
+          <circle cx="22" cy="84" r="2" fill="#ffe6b0"/>
+          <circle cx="120" cy="70" r="2.2" fill="#7cf7ff"/>
+          <circle cx="82" cy="104" r="1.8" fill="#ffe6b0"/>
+          <circle cx="40" cy="130" r="2.6" fill="#ff6ad5"/>
+          <circle cx="140" cy="118" r="2" fill="#a2ffb8"/>
+          <circle cx="96" cy="142" r="2" fill="#ffe6b0"/>
+        </svg>
+    `;
+
+    placeholders.player = svgToDataURI(playerSVG);
+    placeholders.alien = svgToDataURI(alienSVG);
+    placeholders.bullet = svgToDataURI(bulletSVG);
+    placeholders.background = svgToDataURI(bgSVG);
+    return placeholders;
+}
 </script>
 </body>
 </html>
